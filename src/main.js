@@ -1,3 +1,7 @@
+import mermaid from 'mermaid';
+
+mermaid.initialize({ startOnLoad: false, theme: 'default' });
+
 const app = document.getElementById("app");
 
 const BASE_KEY = "insightify.trace_viewer.base_url";
@@ -16,6 +20,7 @@ app.innerHTML = `
       </div>
       <div id="status" class="status">ready</div>
       <div id="summary" class="summary"></div>
+      <div id="mermaid" class="mermaid-container" style="margin-top: 20px; padding: 10px; overflow: auto; border-top: 1px solid var(--line);"></div>
       <div id="flow" class="flow"></div>
       <div id="timeline" class="timeline"></div>
     </div>
@@ -30,6 +35,7 @@ const statusEl = document.getElementById("status");
 const summaryEl = document.getElementById("summary");
 const flowEl = document.getElementById("flow");
 const timelineEl = document.getElementById("timeline");
+const mermaidEl = document.getElementById("mermaid");
 
 baseInput.value = (localStorage.getItem(BASE_KEY) || defaultBase).trim();
 runInput.value = (localStorage.getItem(RUN_KEY) || "").trim();
@@ -67,10 +73,10 @@ function summarizeFlow(events) {
       label: "need_input",
       ok: has(
         (e) =>
-          (e.stage === "register_need_input" && e.source === "interaction") ||
-          (e.stage === "event" &&
-            e.source === "api.watch_run" &&
-            e.fields?.event_type === "EVENT_TYPE_INPUT_REQUIRED"),
+          (e.stage === "open" && e.source === "interaction") ||
+          (e.stage === "resolved" &&
+            e.source === "api.wait_for_input" &&
+            e.fields?.waiting === true),
       ),
     },
     {
@@ -83,7 +89,7 @@ function summarizeFlow(events) {
     },
     {
       label: "frontend_submit",
-      ok: has((e) => e.stage === "submit_input_accepted" && e.source === "frontend"),
+      ok: has((e) => e.stage === "send_message_accepted" && e.source === "frontend"),
     },
   ];
 }
@@ -107,6 +113,76 @@ function renderFlow(events) {
       (s) => `<span class="step ${s.ok ? "ok" : "warn"}">${s.ok ? "OK" : "MISS"} · ${s.label}</span>`,
     )
     .join("");
+}
+
+async function renderMermaid(events) {
+  if (!events || events.length === 0) {
+    mermaidEl.innerHTML = "";
+    return;
+  }
+
+  // Limit events to avoid crashing mermaid with too many nodes
+  const displayEvents = events.length > 200 ? events.slice(-200) : events;
+
+  // 1. Identify unique sources for swimlanes
+  const sources = [...new Set(displayEvents.map((e) => e.source || "unknown"))].sort();
+
+  // 2. Build graph with subgraphs
+  let graph = "graph TD\n";
+
+  // Add subgraphs
+  sources.forEach((src, idx) => {
+    // Sanitize source name for mermaid ID
+    const safeSrc = src.replace(/[^a-zA-Z0-9_]/g, "_");
+    graph += `subgraph ${safeSrc} ["${src}"]\n`;
+
+    // Add nodes belonging to this source
+    displayEvents.forEach((ev, i) => {
+      if ((ev.source || "unknown") === src) {
+        const id = `N${i}`;
+        const time = ev.timestamp ? ev.timestamp.split("T")[1].replace("Z", "").slice(0, 12) : "-";
+        const stage = ev.stage || "-";
+        // Escape quotes and generic formatting
+        const label = `${time}<br/>${stage}`;
+        graph += `${id}["${label}"]\n`;
+      }
+    });
+
+    graph += "end\n";
+  });
+
+  // 3. Add edges (chronological flow)
+  // We link N0 -> N1 -> N2 ... regardless of subgraph
+  for (let i = 0; i < displayEvents.length - 1; i++) {
+    graph += `N${i} --> N${i + 1}\n`;
+  }
+
+  // 4. Styles
+  // Define a class for nodes
+  graph += "classDef default fill:#fff,stroke:#333,stroke-width:1px;\n";
+  // Highlight frontend nodes specifically if needed, or just rely on swimlanes.
+  // Let's color frontend swimlane nodes differently if we want, but swimlanes provide good separation.
+  // Actually, let's keep the node coloring logic for clarity.
+
+  displayEvents.forEach((ev, i) => {
+    const src = ev.source || "";
+    const id = `N${i}`;
+    if (src.startsWith("frontend")) {
+      graph += `style ${id} fill:#e3f2fd,stroke:#0f6db6,stroke-width:2px\n`;
+    } else if (src.startsWith("api") || src === "executor") {
+      graph += `style ${id} fill:#e8f5e9,stroke:#0f8f5f,stroke-width:2px\n`;
+    } else {
+      graph += `style ${id} fill:#fff3e0,stroke:#ef6c00,stroke-width:2px\n`;
+    }
+  });
+
+  try {
+    const { svg } = await mermaid.render('mermaidGraph', graph);
+    mermaidEl.innerHTML = svg;
+  } catch (e) {
+    console.error("Mermaid render error:", e);
+    mermaidEl.innerHTML = `<div style="color:var(--err); padding:10px;">Failed to render flowchart: ${e.message}</div>`;
+  }
 }
 
 function renderTimeline(events) {
@@ -150,6 +226,7 @@ async function loadTrace() {
     events.sort((a, b) => String(a.timestamp || "").localeCompare(String(b.timestamp || "")));
     renderSummary(events);
     renderFlow(events);
+    await renderMermaid(events);
     renderTimeline(events);
     setStatus(`loaded ${events.length} events for ${runId}`);
   } catch (err) {
@@ -164,4 +241,3 @@ runInput.addEventListener("keydown", (e) => {
     void loadTrace();
   }
 });
-

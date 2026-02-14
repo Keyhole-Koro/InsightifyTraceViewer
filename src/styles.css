@@ -180,3 +180,12 @@ body {
   color: #334155;
 }
 
+
+.mermaid-container {
+  margin-top: 20px;
+  padding: 10px;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+  background: white;
+  min-height: 200px;
+}
