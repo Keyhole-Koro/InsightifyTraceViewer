@@ -37,7 +37,7 @@ body {
 .toolbar {
   padding: 14px;
   display: grid;
-  grid-template-columns: 1fr 1fr auto auto;
+  grid-template-columns: 1fr 1fr auto auto auto;
   gap: 8px;
   align-items: center;
 }
@@ -70,8 +70,99 @@ body {
   font-size: 12px;
 }
 
+.content-grid {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 12px;
+  padding: 0 14px 14px;
+}
+
+.latest-panel {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fcfdff;
+  min-height: 300px;
+  max-height: 76vh;
+  overflow: hidden;
+}
+
+.latest-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.latest-head h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.latest-head button {
+  border: 1px solid rgba(15, 109, 182, 0.45);
+  background: rgba(15, 109, 182, 0.1);
+  color: var(--accent);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.latest-list {
+  padding: 8px;
+  overflow: auto;
+  max-height: calc(76vh - 52px);
+}
+
+.latest-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.latest-item:hover {
+  border-color: rgba(15, 109, 182, 0.6);
+  background: rgba(15, 109, 182, 0.04);
+}
+
+.latest-run {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.latest-meta {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.latest-empty {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 8px;
+}
+
+.latest-error {
+  color: var(--err);
+}
+
+.details-panel {
+  min-width: 0;
+}
+
 .summary {
-  margin-top: 12px;
+  margin-top: 0;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
@@ -125,7 +216,7 @@ body {
 .timeline {
   margin-top: 12px;
   padding: 10px;
-  max-height: 62vh;
+  max-height: 54vh;
   overflow: auto;
   border-top: 1px solid var(--line);
 }
@@ -188,4 +279,10 @@ body {
   border-top: 1px solid var(--line);
   background: white;
   min-height: 200px;
+}
+
+@media (max-width: 1100px) {
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
 }

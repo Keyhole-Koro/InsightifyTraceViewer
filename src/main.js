@@ -7,7 +7,7 @@ const app = document.getElementById("app");
 const BASE_KEY = "insightify.trace_viewer.base_url";
 const RUN_KEY = "insightify.trace_viewer.last_run_id";
 
-const defaultBase = "http://localhost:8080";
+const defaultBase = "http://localhost:8081";
 
 app.innerHTML = `
   <div class="wrap">
@@ -17,12 +17,26 @@ app.innerHTML = `
         <input id="runId" placeholder="run_id" />
         <button id="loadBtn" type="button">Load</button>
         <button id="refreshBtn" type="button">Refresh</button>
+        <button id="latestBtn" type="button">Load Latest</button>
       </div>
       <div id="status" class="status">ready</div>
-      <div id="summary" class="summary"></div>
-      <div id="mermaid" class="mermaid-container" style="margin-top: 20px; padding: 10px; overflow: auto; border-top: 1px solid var(--line);"></div>
-      <div id="flow" class="flow"></div>
-      <div id="timeline" class="timeline"></div>
+
+      <div class="content-grid">
+        <aside class="latest-panel">
+          <div class="latest-head">
+            <h3>Latest Runs</h3>
+            <button id="reloadLatestBtn" type="button">Reload</button>
+          </div>
+          <div id="latestList" class="latest-list"></div>
+        </aside>
+
+        <section class="details-panel">
+          <div id="summary" class="summary"></div>
+          <div id="flow" class="flow"></div>
+          <div id="mermaid" class="mermaid-container"></div>
+          <div id="timeline" class="timeline"></div>
+        </section>
+      </div>
     </div>
   </div>
 `;
@@ -31,11 +45,14 @@ const baseInput = document.getElementById("baseUrl");
 const runInput = document.getElementById("runId");
 const loadBtn = document.getElementById("loadBtn");
 const refreshBtn = document.getElementById("refreshBtn");
+const latestBtn = document.getElementById("latestBtn");
+const reloadLatestBtn = document.getElementById("reloadLatestBtn");
 const statusEl = document.getElementById("status");
 const summaryEl = document.getElementById("summary");
 const flowEl = document.getElementById("flow");
 const timelineEl = document.getElementById("timeline");
 const mermaidEl = document.getElementById("mermaid");
+const latestListEl = document.getElementById("latestList");
 
 baseInput.value = (localStorage.getItem(BASE_KEY) || defaultBase).trim();
 runInput.value = (localStorage.getItem(RUN_KEY) || "").trim();
@@ -121,28 +138,20 @@ async function renderMermaid(events) {
     return;
   }
 
-  // Limit events to avoid crashing mermaid with too many nodes
   const displayEvents = events.length > 200 ? events.slice(-200) : events;
-
-  // 1. Identify unique sources for swimlanes
   const sources = [...new Set(displayEvents.map((e) => e.source || "unknown"))].sort();
 
-  // 2. Build graph with subgraphs
   let graph = "graph TD\n";
 
-  // Add subgraphs
-  sources.forEach((src, idx) => {
-    // Sanitize source name for mermaid ID
+  sources.forEach((src) => {
     const safeSrc = src.replace(/[^a-zA-Z0-9_]/g, "_");
     graph += `subgraph ${safeSrc} ["${src}"]\n`;
 
-    // Add nodes belonging to this source
     displayEvents.forEach((ev, i) => {
       if ((ev.source || "unknown") === src) {
         const id = `N${i}`;
         const time = ev.timestamp ? ev.timestamp.split("T")[1].replace("Z", "").slice(0, 12) : "-";
         const stage = ev.stage || "-";
-        // Escape quotes and generic formatting
         const label = `${time}<br/>${stage}`;
         graph += `${id}["${label}"]\n`;
       }
@@ -151,18 +160,11 @@ async function renderMermaid(events) {
     graph += "end\n";
   });
 
-  // 3. Add edges (chronological flow)
-  // We link N0 -> N1 -> N2 ... regardless of subgraph
   for (let i = 0; i < displayEvents.length - 1; i++) {
     graph += `N${i} --> N${i + 1}\n`;
   }
 
-  // 4. Styles
-  // Define a class for nodes
   graph += "classDef default fill:#fff,stroke:#333,stroke-width:1px;\n";
-  // Highlight frontend nodes specifically if needed, or just rely on swimlanes.
-  // Let's color frontend swimlane nodes differently if we want, but swimlanes provide good separation.
-  // Actually, let's keep the node coloring logic for clarity.
 
   displayEvents.forEach((ev, i) => {
     const src = ev.source || "";
@@ -204,18 +206,31 @@ function renderTimeline(events) {
     .join("");
 }
 
-async function loadTrace() {
+function clearDetails() {
+  summaryEl.innerHTML = "";
+  flowEl.innerHTML = "";
+  mermaidEl.innerHTML = "";
+  timelineEl.innerHTML = "";
+}
+
+async function loadTraceByRunId(runId, { skipStatus = false } = {}) {
   const baseUrl = baseInput.value.trim().replace(/\/$/, "");
-  const runId = runInput.value.trim();
-  if (!baseUrl || !runId) {
+  const normalizedRunId = (runId || "").trim();
+  if (!baseUrl || !normalizedRunId) {
     setStatus("base URL and run_id are required", true);
     return;
   }
+
+  runInput.value = normalizedRunId;
   localStorage.setItem(BASE_KEY, baseUrl);
-  localStorage.setItem(RUN_KEY, runId);
-  setStatus("loading...");
+  localStorage.setItem(RUN_KEY, normalizedRunId);
+
+  if (!skipStatus) {
+    setStatus(`loading ${normalizedRunId}...`);
+  }
+
   try {
-    const res = await fetch(`${baseUrl}/debug/run-logs?run_id=${encodeURIComponent(runId)}`, {
+    const res = await fetch(`${baseUrl}/trace/run-logs?run_id=${encodeURIComponent(normalizedRunId)}`, {
       credentials: "include",
     });
     if (!res.ok) {
@@ -228,16 +243,102 @@ async function loadTrace() {
     renderFlow(events);
     await renderMermaid(events);
     renderTimeline(events);
-    setStatus(`loaded ${events.length} events for ${runId}`);
+    setStatus(`loaded ${events.length} events for ${normalizedRunId}`);
   } catch (err) {
+    clearDetails();
     setStatus(err instanceof Error ? err.message : String(err), true);
   }
 }
 
+async function loadTrace() {
+  await loadTraceByRunId(runInput.value);
+}
+
+function renderLatestList(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    latestListEl.innerHTML = `<div class="latest-empty">No trace runs found yet.</div>`;
+    return;
+  }
+  latestListEl.innerHTML = items
+    .map((item) => {
+      const runId = String(item.run_id || "").trim();
+      const count = Number(item.event_count || 0);
+      const lastTs = String(item.last_ts || "-");
+      if (!runId) {
+        return "";
+      }
+      return `
+        <button type="button" class="latest-item" data-run-id="${runId}">
+          <div class="latest-run">${runId}</div>
+          <div class="latest-meta">
+            <span>${count} events</span>
+            <span>${lastTs}</span>
+          </div>
+        </button>
+      `;
+    })
+    .join("");
+
+  for (const btn of latestListEl.querySelectorAll(".latest-item")) {
+    btn.addEventListener("click", () => {
+      const runId = btn.getAttribute("data-run-id") || "";
+      void loadTraceByRunId(runId);
+    });
+  }
+}
+
+async function reloadLatest() {
+  const baseUrl = baseInput.value.trim().replace(/\/$/, "");
+  if (!baseUrl) {
+    setStatus("base URL is required", true);
+    return;
+  }
+  localStorage.setItem(BASE_KEY, baseUrl);
+
+  try {
+    const res = await fetch(`${baseUrl}/trace/run-logs/latest?limit=30`, {
+      credentials: "include",
+    });
+    if (!res.ok) {
+      throw new Error(`latest request failed: ${res.status}`);
+    }
+    const body = await res.json();
+    const items = Array.isArray(body?.items) ? body.items : [];
+    renderLatestList(items);
+    return items;
+  } catch (err) {
+    latestListEl.innerHTML = `<div class="latest-empty latest-error">${err instanceof Error ? err.message : String(err)}</div>`;
+    return [];
+  }
+}
+
+async function loadLatestTrace() {
+  setStatus("loading latest trace...");
+  const items = await reloadLatest();
+  if (!items || items.length === 0) {
+    setStatus("no latest trace found", true);
+    return;
+  }
+  const latestRunId = String(items[0]?.run_id || "").trim();
+  if (!latestRunId) {
+    setStatus("latest trace run_id is empty", true);
+    return;
+  }
+  await loadTraceByRunId(latestRunId, { skipStatus: true });
+}
+
 loadBtn.addEventListener("click", () => void loadTrace());
 refreshBtn.addEventListener("click", () => void loadTrace());
+latestBtn.addEventListener("click", () => void loadLatestTrace());
+reloadLatestBtn.addEventListener("click", () => void reloadLatest());
+
 runInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     void loadTrace();
   }
 });
+
+void reloadLatest();
+if (runInput.value.trim()) {
+  void loadTrace();
+}
